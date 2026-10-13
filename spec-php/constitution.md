@@ -1,81 +1,83 @@
-# Constitución — Manager Library (React + Laravel)
+# Constitution — Manager Library (React + Laravel)
 
-Traducción de [`spec-python/constitution.md`](../spec-python/constitution.md) al stack real del reto. Los principios
-son los mismos; lo que cambia es **cómo se verifican** en Laravel/PHP. Donde el stack obliga a un compromiso
-pragmático, se declara explícitamente — no se esconde.
+Translation of [`spec-python/constitution.md`](../spec-python/constitution.md) to the real stack of the
+challenge. The principles are the same; what changes is **how they are verified** in Laravel/PHP. Where the
+stack forces a pragmatic trade-off, it is declared explicitly — never hidden.
+
+> **Note on Article XI (deviation):** the reference spec requires documentation and user-facing messages in
+> Spanish, code/columns/routes in English. For this fork, by explicit decision of the candidate, **all
+> documentation and all user-facing API messages are written in English** instead. Business rules, data model
+> and HTTP contract are unaffected — only the language of prose and error text changes.
 
 ---
 
-## Artículo I — El dominio no depende de nada
+## Article I — The domain depends on nothing
 
-Las invariantes puras (`Isbn`, `Quantity`, `DateRange`) viven en `app/Domain/ValueObjects/`: PHP puro, sin
-Eloquent, sin Laravel, sin librerías de terceros. Se prueban con PHPUnit sin base de datos y sin framework.
+Pure invariants (`Isbn`, `Quantity`, `DateRange`) live in `app/Domain/ValueObjects/`: plain PHP, no Eloquent, no
+Laravel, no third-party libraries. `App\Domain\Entities\{Book,Member,User,Loan,LoanItem}` are also plain PHP
+classes with zero framework dependency — they do not extend Eloquent's `Model` and know nothing about
+PostgreSQL, HTTP or Sanctum. They are unit-tested with PHPUnit without a database, a server or a container.
 
-**Compromiso declarado:** a diferencia del spec Python (que aísla *todo* el dominio, incluidos `Book`/`Loan`/`Member`/`User`
-como agregados sin ORM), aquí `Book`, `Loan`, `Member` y `User` son **modelos Eloquent** con la lógica de invariantes
-en métodos propios del modelo o en clases de servicio. Es una concesión de tiempo/pragmatismo del framework, no
-una negación del principio: las invariantes siguen centralizadas y probadas, no dispersas en los controladores.
+## Article II — The core declares its ports; the world implements them
 
-## Artículo II — El núcleo declara sus puertos; el mundo los implementa
+The application layer (`app/Application/Services/*`) only knows the domain. Everything it needs from the
+outside (repositories, clock, password hashing, token issuing, cover storage) is expressed as a **port it
+defines itself** (`app/Application/Ports/*`, PHP interfaces). No framework or ORM type appears in a port's
+signature.
 
-Los casos de uso (`app/Services/*`) no conocen HTTP: reciben datos simples, devuelven resultados simples o lanzan
-excepciones de dominio propias (`BookNotAvailableException`, `MemberHasOverdueException`, …). Los controladores
-(`app/Http/Controllers`) son los únicos que traducen esas excepciones al cuerpo de error único de `api-contract.md`.
+## Article III — A single composition point
 
-## Artículo III — Un único punto de composición
+A single provider, `app/Providers/AppServiceProvider.php`, is where a port meets its adapter
+(`$this->app->bind(BookRepository::class, EloquentBookRepository::class)`). No infrastructure is instantiated
+outside of it.
 
-Laravel resuelve dependencias por su *service container*. Los *bindings* explícitos (interfaz → implementación,
-p. ej. `CoverStorage` → `DiskCoverStorage`) se declaran en un único proveedor: `app/Providers/AppServiceProvider.php`.
-Fuera de ahí no se instancia infraestructura a mano.
+## Article IV — SOLID is not decorative
 
-## Artículo IV — SOLID no es decorativo
-
-| Principio | Aplicación concreta en Laravel |
+| Principle | Concrete application |
 |---|---|
-| **SRP** | Un servicio de aplicación = un caso de uso (`LendBooksService`, `ReturnLoanItemService`, …) |
-| **OCP** | Cambiar el almacenamiento de portadas (disco → S3) implementa la misma interfaz `CoverStorage` |
-| **LSP** | Los *fakes* en tests sustituyen la implementación real sin cambiar la expectativa del test |
-| **ISP** | Interfaces pequeñas: `CoverStorage`, `Clock` — ningún implementador deja métodos sin usar |
-| **DIP** | Los servicios dependen de interfaces, inyectadas por el contenedor de Laravel |
+| **SRP** | One application service = one use case (`LendBooksService` lends, nothing else) |
+| **OCP** | Swapping cover storage (disk → S3) only adds a class implementing `CoverStorage` |
+| **LSP** | Test fakes replace the real adapter without changing expectations |
+| **ISP** | Small ports: `Clock`, `PasswordHasher`, `TokenIssuer`, `CoverStorage`, one repository interface per aggregate |
+| **DIP** | Ports are defined by the layer that consumes them (`Application`), implemented by `Infrastructure` |
 
-## Artículo V — El esquema es propiedad de las migraciones
+## Article V — The schema is owned by the migrations
 
-El repositorio `infra` levanta un motor **vacío** (`docker-compose.yml`, sin `CREATE TABLE`). Todo el DDL vive en
-las migraciones nativas de Laravel (`database/migrations/`), equivalente a Alembic en el spec de referencia.
-Ver [ADR-001](adr/adr-001-propiedad-del-esquema.md).
+The `infra` repository boots an **empty** engine (`docker-compose.yml`, no SQL init volume). All DDL lives in
+Laravel's native migrations (`database/migrations/`), the equivalent of Alembic in the reference spec. See
+[ADR-001](adr/adr-001-schema-ownership.md).
 
-## Artículo VI — Las invariantes que la base puede imponer, la base las impone
+## Article VI — Invariants the engine can enforce, the engine enforces
 
-`CHECK`, `UNIQUE` y `FK` se declaran en las migraciones, no solo en el código: `ck_book_available_range`,
-`ck_book_total_positive`, `ck_user_role`, índice único parcial de `isbn` sobre libros activos. Ya están en la
-migración inicial — no se dejaron pendientes, a diferencia del spec de referencia que los marca T-18.
+`CHECK`, `UNIQUE` and `FK` are declared in migrations, not only in code: `ck_book_available_range`,
+`ck_book_total_positive`, `ck_user_role`, a partial unique index on `isbn` over active books. These are already
+in the initial migration — not left pending, unlike the reference spec which marks them as a later task (T-18).
 
-## Artículo VII — Lo derivado se calcula, no se almacena
+## Article VII — Derived state is computed, never stored
 
-El estado del préstamo (`open`, `overdue`, `closed`) y los días de retraso se calculan en `Loan::status()` y en
-la consulta de vencidos. No hay columna para ellos.
+Loan status (`open`, `overdue`, `closed`) and days late are computed in `Loan::status()` and in the overdue
+query. There is no column for them.
 
-## Artículo VIII — Los valores congelados no siguen al catálogo
+## Article VIII — Frozen values do not follow the catalog
 
-`loan_item` guarda `book_title`, `isbn` y `category_name` del instante del préstamo. El reporte y el listado de
-vencidos leen de `loan_item`, nunca de `book`/`category` en vivo.
+`loan_item` stores `book_title`, `isbn` and `category_name` as they were at the moment of the loan. The report
+and the overdue listing always read from `loan_item`, never from live `book`/`category`.
 
-## Artículo IX — Ningún secreto entra al repositorio ni a un log
+## Article IX — No secret enters the repository or a log
 
-`.env` real en `.gitignore`; solo se versiona `.env.example`. El hash de contraseña (`password_hash`) está en
-`$hidden` del modelo `User` y nunca se registra en logs. Verificación: `grep` de patrones en CI y prueba de
-contrato que confirma que ninguna respuesta incluye `password` ni `password_hash`.
+The real `.env` is in `.gitignore`; only `.env.example` is committed. The password hash (`password_hash`) is in
+`User`'s `$hidden` and never logged. Verified by a pattern grep in CI and a contract test confirming no response
+ever includes `password` or `password_hash`.
 
-## Artículo X — Gana el motor
+## Article X — The engine wins
 
-Si `data-model.md` y la base discrepan, se corrige el documento, no la base.
+If `data-model.md` and the database disagree, the document is wrong and gets corrected.
 
-## Artículo XI — Idioma
+## Article XI — Language
 
-Código, columnas y rutas en inglés (`loan_item`, `due_at`, `/api/v1/loans`). Documentación y mensajes de error
-de la API al usuario, en español.
+Code, columns and routes in English (`loan_item`, `due_at`, `/api/v1/loans`). By the deviation noted above,
+documentation and the API's user-facing error messages are also in English in this fork.
 
-## Artículo XII — Nada se da por hecho sin evidencia
+## Article XII — Nothing is assumed done without evidence
 
-Una tarea de [`tasks.md`](tasks.md) está terminada cuando su evidencia existe y se puede ejecutar — no cuando
-«ya está programada».
+A task in [`tasks.md`](tasks.md) is done when its evidence exists and can be run — not when "it's already coded".

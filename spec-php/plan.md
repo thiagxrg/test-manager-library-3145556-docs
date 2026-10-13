@@ -1,48 +1,49 @@
-# Plan técnico — Manager Library (React + Laravel)
+# Technical plan — Manager Library (React + Laravel)
 
-Cómo se construye lo que dicen [`spec.md`](../spec-python/spec.md) y [`constitution.md`](constitution.md) (ambos
-idénticos en negocio al spec de referencia). El esquema vive en [`data-model.md`](../spec-python/data-model.md)
-(también idéntico: el modelo de datos no depende del lenguaje). La forma del sistema está en [`architecture.md`](architecture.md).
+How to build what [`spec.md`](../spec-python/spec.md) and [`constitution.md`](constitution.md) describe (both
+identical in business terms to the reference spec). The schema lives in
+[`data-model.md`](data-model.md) (also identical: the data model does not depend on the language). The shape of
+the system is in [`architecture.md`](architecture.md).
 
-## 1. Decisiones técnicas
+## 1. Technical decisions
 
-| # | Decisión | Elección (Laravel) | Equivalente en el spec de referencia (Python) | Por qué |
+| # | Decision | Choice (Laravel) | Reference spec equivalent (Python) | Why |
 |---|---|---|---|---|
-| D-01 | Lenguaje y runtime | PHP 8.2 | Python 3.12 | Stack del reto |
-| D-02 | Framework HTTP | Laravel 11 | FastAPI | Contrato en `api-contract.md` |
-| D-03 | Persistencia | Eloquent + migraciones nativas sobre PostgreSQL 16 | SQLAlchemy 2 + Alembic | El esquema es propiedad de las migraciones (ADR-001) |
-| D-04 | Concurrencia | `CHECK` de rango en `book` + bloqueo de fila (`lockForUpdate`) dentro de la transacción de préstamo | Testigo de versión + `CHECK` | Último ejemplar: uno 201, el otro 409 (RNF-2, ADR-002) |
-| D-05 | Fechas | Instantes UTC (`timestamptz`); reloj inyectable para pruebas | Puerto `Clock` | Probar vencimientos sin esperar 14 días |
-| D-06 | Reporte | Consulta agregada única sobre `loan_item`, agrupada por valores congelados | Puerto de lectura agregado | Estable y barato (ADR-004) |
-| D-07 | Objetos de valor | `App\Domain\ValueObjects\{Isbn,Quantity,DateRange}`: PHP puro, sin Eloquent | Igual | No tienen identidad; viven en la fila de su dueño |
-| D-08 | Portadas | Disco local (`storage/app/covers`) en desarrollo; la base guarda solo `cover_key` | Disco/S3 detrás de `CoverStorage` | Clave opaca, nunca ruta |
-| D-09 | Contraseñas | Hash nativo de Laravel (bcrypt), `password_hash` oculto en el modelo | Argon2id detrás de `PasswordHasher` | Artículo IX |
-| D-10 | Arranque | Comando/seeder crea el admin inicial desde `ADMIN_USERNAME`/`ADMIN_PASSWORD` | Igual | La base no puede producir el hash |
-| D-11 | Autenticación | **Laravel Sanctum** (tokens de acceso personal), expiración 8 h | JWT HS256, clave en `JWT_SECRET` | Mismo contrato (`Authorization: Bearer <token>`); Sanctum es el estándar de Laravel y evita reinventar firma/verificación |
-| D-12 | Pruebas | PHPUnit/Pest: unitarias de dominio sin BD, *feature* contra Postgres real | pytest con *fakes* + integración | Misma pirámide de pruebas |
+| D-01 | Language and runtime | PHP 8.2 | Python 3.12 | Challenge stack |
+| D-02 | HTTP framework | Laravel 11 | FastAPI | Contract in `api-contract.md` |
+| D-03 | Persistence | Eloquent + native migrations over PostgreSQL 16 | SQLAlchemy 2 + Alembic | The schema is owned by migrations (ADR-001) |
+| D-04 | Concurrency | `CHECK` range on `book` + row lock (`lockForUpdate`) inside the loan transaction | Version token + `CHECK` | Last copy: one 201, the other 409 (RNF-2, ADR-002) |
+| D-05 | Dates | UTC instants (`timestamptz`); injectable clock for testing | `Clock` port | Test due dates without waiting 14 days |
+| D-06 | Report | Single aggregated query over `loan_item`, grouped by frozen values | Aggregated read port | Stable and cheap (ADR-004) |
+| D-07 | Value objects | `App\Domain\ValueObjects\{Isbn,Quantity,DateRange}`: plain PHP, no Eloquent | Same | No identity; live inside their owner's row |
+| D-08 | Covers | Local disk (`storage/app/covers`) in development; the database stores only `cover_key` | Disk/S3 behind `CoverStorage` | Opaque key, never a path |
+| D-09 | Passwords | Laravel's native hashing (bcrypt), `password_hash` hidden on the model | Argon2id behind `PasswordHasher` | Article IX |
+| D-10 | Bootstrap | Command/seeder creates the initial admin from `ADMIN_USERNAME`/`ADMIN_PASSWORD` | Same | The database cannot produce the hash |
+| D-11 | Authentication | **Laravel Sanctum** (personal access tokens), 8h expiration | JWT HS256, key in `JWT_SECRET` | Same contract (`Authorization: Bearer <token>`); Sanctum is Laravel's standard and avoids reinventing signing/verification |
+| D-12 | Testing | PHPUnit/Pest: domain unit tests with no DB, feature tests against real Postgres | pytest with fakes + integration | Same test pyramid |
 
-## 2. Configuración por entorno
+## 2. Environment configuration
 
-| Variable | Obligatoria | Ejemplo |
+| Variable | Required | Example |
 |---|---|---|
-| `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | sí | Postgres 16, esquema `library` |
-| `DB_SCHEMA` | no (default `library,public`) | `search_path` de la conexión |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | sí | definidos en `.env`, nunca en el repo |
+| `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | yes | Postgres 16, schema `library` |
+| `DB_SCHEMA` | no (default `library,public`) | connection `search_path` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | yes | set in `.env`, never in the repo |
 | `COVERS_DIR` | no | `storage/app/covers` |
-| `CORS_ORIGIN` | sí | `http://localhost:5173` |
+| `CORS_ORIGIN` | yes | `http://localhost:5173` |
 
-## 3. Estrategia de pruebas
+## 3. Test strategy
 
-| Nivel | Qué prueba | Contra qué |
+| Level | What it tests | Against what |
 |---|---|---|
-| Dominio | `Isbn` (13 dígitos), `Quantity` (> 0), `DateRange` (fin ≥ inicio) | Nada: PHP puro |
-| Aplicación/servicio | Casos de uso: prestar, devolver, reporte | Modelos Eloquent contra una BD de pruebas |
-| Integración | Migraciones, constraints, búsqueda paginada | PostgreSQL real |
-| Contrato | Cuerpo de error único y códigos de estado de `api-contract.md` | La API levantada |
-| Concurrencia | Dos préstamos del último ejemplar | PostgreSQL real, dos peticiones simultáneas |
+| Domain | `Isbn` (13 digits), `Quantity` (> 0), `DateRange` (end ≥ start) | Nothing: plain PHP |
+| Application/service | Use cases: lend, return, report | Real models against a test database |
+| Integration | Migrations, constraints, paginated search | Real PostgreSQL |
+| Contract | Single error body and status codes from `api-contract.md` | The running API |
+| Concurrency | Two loans of the last copy | Real PostgreSQL, two simultaneous requests |
 
-## 4. Orden de construcción
+## 4. Build order
 
-Esqueleto y `/health` → migración inicial con semilla → objetos de valor de dominio → autenticación (Sanctum) →
-libros → socios → préstamos (transacción crítica) → devoluciones y vencidos → reporte → pruebas de contrato y
-concurrencia → frontend React. El detalle con evidencia está en [`tasks.md`](tasks.md).
+Skeleton and `/health` → initial migration with seed → domain value objects/entities → authentication (Sanctum)
+→ books → members → loans (critical transaction) → returns and overdue → report → contract and concurrency
+tests → React frontend. Details with evidence are in [`tasks.md`](tasks.md).
