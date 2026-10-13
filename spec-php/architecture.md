@@ -8,54 +8,48 @@ Articles I to III of [`constitution.md`](constitution.md).
 ```mermaid
 flowchart LR
     subgraph Inbound
-      HTTP["app/Http/Controllers<br/>(routes/api.php)"]
+      HTTP["adapters/inbound/http<br/>(Laravel controllers)"]
     end
     subgraph Core
-      SVC["app/Application/Services<br/>use cases"]
-      PORT["app/Application/Ports<br/>interfaces"]
-      DOM["app/Domain/Entities + ValueObjects<br/>plain PHP"]
+      APP["application<br/>use cases + ports"]
+      DOM["domain<br/>aggregates and value objects"]
     end
     subgraph Outbound
-      ELO["app/Infrastructure/Persistence/Eloquent<br/>models + repositories"]
-      STO["app/Infrastructure/Storage<br/>DiskCoverStorage"]
-      SEC["app/Infrastructure/Security<br/>BcryptPasswordHasher, SanctumTokenIssuer"]
-      CLK["app/Infrastructure/Clock<br/>SystemClock"]
+      DB["adapters/outbound/persistence<br/>(Eloquent)"]
+      STO["adapters/outbound/storage<br/>covers"]
+      SEC["adapters/outbound/security<br/>hash and token"]
     end
-    HTTP --> SVC --> PORT --> DOM
-    ELO -.implements.-> PORT
-    STO -.implements.-> PORT
-    SEC -.implements.-> PORT
-    CLK -.implements.-> PORT
+    HTTP --> APP --> DOM
+    DB -. implements ports of .-> APP
+    STO -. implements .-> APP
+    SEC -. implements .-> APP
 ```
 
-Dependency arrows point **inward**. `app/Providers/AppServiceProvider.php` is the only place that sees both
-halves (Article III).
+Dependency arrows point **inward**. `bootstrap` is the only layer that sees both halves.
 
 ## 2. Folder structure
 
 ```text
-app/
-├── Domain/
-│   ├── Entities/          # Book, Member, User, Loan, LoanItem — plain PHP, no Eloquent
-│   ├── ValueObjects/       # Isbn, Quantity, DateRange
-│   └── Exceptions/         # BookNotAvailableException, MemberHasOverdueException, ...
-├── Application/
-│   ├── Ports/              # BookRepository, MemberRepository, UserRepository, LoanRepository,
-│   │                       # CategoryRepository, ReportReader, Clock, PasswordHasher, TokenIssuer, CoverStorage
-│   └── Services/           # LendBooksService, ReturnLoanItemService, LoginService, CreateLibrarianService,
-│                           # SearchBooksService, CreateBookService, OverdueService, MostBorrowedReportService, ...
-├── Infrastructure/
-│   ├── Persistence/Eloquent/  # CategoryModel, BookModel, MemberModel, UserModel, LoanModel, LoanItemModel
-│   │                          # + EloquentBookRepository, EloquentLoanRepository, ...
-│   ├── Security/           # BcryptPasswordHasher, SanctumTokenIssuer
-│   ├── Clock/               # SystemClock
-│   └── Storage/             # DiskCoverStorage
-├── Http/
-│   ├── Controllers/         # one controller per contract resource
-│   ├── Middleware/          # role-based authorization
-│   └── Resources/           # JSON response shaping
-└── Providers/AppServiceProvider.php   # the single composition point
+src/Library/
+├── domain/              # Book, Loan, LoanItem, Member, User; Isbn, Quantity, DateRange
+│   └── exceptions/      # one class per api-contract.md error code
+├── application/
+│   ├── ports/outbound/  # BookRepository, LoanRepository, MemberRepository, UserRepository,
+│   │                    # ReportReader, Clock, PasswordHasher, TokenIssuer, CoverStorage
+│   └── services/        # LendBooksService, ReturnItemService, CreateBookService, SearchBooksService,
+│                        # OverdueService, MostBorrowedReportService, LoginService, CreateLibrarianService
+├── adapters/
+│   ├── inbound/http/    # controllers, request validation, error handling
+│   └── outbound/
+│       ├── persistence/ # Eloquent models + repository implementations
+│       ├── storage/      # DiskCoverStorage
+│       └── security/     # BcryptPasswordHasher, SanctumTokenIssuer
+└── bootstrap/composition/   # the single composition point
 ```
+
+A dedicated `Library\` PSR-4 namespace (`composer.json`) maps to `src/Library/`, separate from Laravel's own
+`App\` namespace in `app/` (which keeps only what Laravel itself needs to boot: providers, routes, config —
+glue, not business code).
 
 ## 3. Aggregates (invariants they defend)
 
