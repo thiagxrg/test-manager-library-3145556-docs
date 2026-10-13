@@ -45,7 +45,7 @@ outside of it.
 
 The `infra` repository boots an **empty** engine (`docker-compose.yml`, no SQL init volume). All DDL lives in
 Laravel's native migrations (`database/migrations/`), the equivalent of Alembic in the reference spec. See
-[ADR-001](adr/adr-001-schema-ownership.md).
+[ADR-001](adr/adr-001-propiedad-del-esquema.md).
 
 ## Article VI — Invariants the engine can enforce, the engine enforces
 
