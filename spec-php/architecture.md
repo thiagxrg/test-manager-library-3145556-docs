@@ -1,8 +1,7 @@
 # Architecture — Manager Library (React + Laravel)
 
-Layered architecture with dependency pointing inward, same spirit as the reference spec's hexagonal
-architecture (ports and adapters, Articles I-III of [`constitution.md`](constitution.md)), implemented as a
-true hexagonal split in this fork — not just a Laravel-idiomatic approximation.
+**Hexagonal** architecture (ports and adapters), same as the reference spec. The dependency rules are
+Articles I to III of [`constitution.md`](constitution.md).
 
 ## 1. Layers and dependencies
 
